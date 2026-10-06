@@ -1,0 +1,214 @@
+name: 'sf-audit: Salesforce Org Security Audit'
+description: 'Read-only security audit of a live Salesforce org: 93 checks, A-F grade, attack chains. Fails the job when posture slips.'
+author: 'CloudCounsel (cclabsnz)'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  auth-url:
+    description: 'SFDX auth URL for the org to audit (from `sf org display --verbose`). Pass it from a secret. Use this or the JWT inputs.'
+    required: false
+  jwt-client-id:
+    description: 'Connected app consumer key, for JWT login.'
+    required: false
+  jwt-key:
+    description: 'PEM private key for JWT login. Pass it from a secret.'
+    required: false
+  jwt-username:
+    description: 'Username of the integration user, for JWT login.'
+    required: false
+  instance-url:
+    description: 'Login URL for JWT login, e.g. https://login.salesforce.com or https://test.salesforce.com.'
+    required: false
+    default: 'https://login.salesforce.com'
+  fail-on:
+    description: 'Fail the job when any finding is at or above this severity: CRITICAL, HIGH, MEDIUM or LOW. Empty never fails on findings.'
+    required: false
+    default: ''
+  fail-on-inconclusive:
+    description: 'Fail the job (exit 3) when a check could not gather evidence.'
+    required: false
+    default: 'false'
+  checks:
+    description: 'Comma-separated check IDs to run. Empty runs all checks.'
+    required: false
+    default: ''
+  format:
+    description: 'Report formats, comma-separated: html, md, json, executive. json is always added, because the job summary is built from it.'
+    required: false
+    default: 'html,md'
+  output-dir:
+    description: 'Directory the reports are written to.'
+    required: false
+    default: 'sf-audit-report'
+  job-summary:
+    description: 'Write a digest of the results to the job summary. Turn this off in public repositories: anyone can read a public job summary.'
+    required: false
+    default: 'true'
+  upload-artifact:
+    description: 'Upload the reports as a workflow artifact. In a public repository, anyone signed in to GitHub can download it.'
+    required: false
+    default: 'true'
+  artifact-name:
+    description: 'Name of the uploaded artifact.'
+    required: false
+    default: 'sf-audit-report'
+  plugin-version:
+    description: 'Version of @cclabsnz/sf-audit to install. Pin this in production workflows.'
+    required: false
+    default: 'latest'
+  cli-version:
+    description: 'Version of @salesforce/cli to install.'
+    required: false
+    default: 'latest'
+  node-version:
+    description: 'Node.js version used to run the Salesforce CLI.'
+    required: false
+    default: '22'
+
+outputs:
+  grade:
+    description: 'Letter grade, A to F.'
+    value: ${{ steps.audit.outputs.grade }}
+  health-score:
+    description: 'Health score, 0 to 100.'
+    value: ${{ steps.audit.outputs.health-score }}
+  json-report:
+    description: 'Path to the JSON report.'
+    value: ${{ steps.audit.outputs.json-report }}
+  exit-code:
+    description: 'Exit code of the audit: 0 clean, 1 a finding at or above fail-on, 3 inconclusive with fail-on-inconclusive.'
+    value: ${{ steps.audit.outputs.exit-code }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Install the Salesforce CLI and sf-audit
+      shell: bash
+      env:
+        CLI_VERSION: ${{ inputs.cli-version }}
+        PLUGIN_VERSION: ${{ inputs.plugin-version }}
+      run: |
+        set -euo pipefail
+        npm install --global --no-audit --no-fund "@salesforce/cli@${CLI_VERSION}"
+        # The plugin is published with npm provenance but cannot carry a Salesforce signature, so
+        # allowlist it. Otherwise the unsigned-plugin prompt waits for input and hangs the job.
+        mkdir -p "$HOME/.config/sf"
+        echo '["@cclabsnz/sf-audit"]' > "$HOME/.config/sf/unsignedPluginAllowList.json"
+        sf plugins install "@cclabsnz/sf-audit@${PLUGIN_VERSION}"
+        sf plugins --core | grep -i 'sf-audit'
+
+    - name: Log in to the org
+      shell: bash
+      env:
+        AUTH_URL: ${{ inputs.auth-url }}
+        JWT_CLIENT_ID: ${{ inputs.jwt-client-id }}
+        JWT_KEY: ${{ inputs.jwt-key }}
+        JWT_USERNAME: ${{ inputs.jwt-username }}
+        INSTANCE_URL: ${{ inputs.instance-url }}
+      run: |
+        set -euo pipefail
+        umask 077
+        secret_file="$(mktemp)"
+        trap 'rm -f "$secret_file"' EXIT
+        if [ -n "${AUTH_URL}" ]; then
+          echo "::add-mask::${AUTH_URL}"
+          printf '%s' "${AUTH_URL}" > "$secret_file"
+          sf org login sfdx-url --sfdx-url-file "$secret_file" --alias sf-audit-target > /dev/null
+        elif [ -n "${JWT_CLIENT_ID}" ] && [ -n "${JWT_KEY}" ] && [ -n "${JWT_USERNAME}" ]; then
+          printf '%s' "${JWT_KEY}" > "$secret_file"
+          sf org login jwt --client-id "${JWT_CLIENT_ID}" --jwt-key-file "$secret_file" \
+            --username "${JWT_USERNAME}" --instance-url "${INSTANCE_URL}" --alias sf-audit-target > /dev/null
+        else
+          echo "::error::Provide auth-url, or all of jwt-client-id, jwt-key and jwt-username."
+          exit 1
+        fi
+        echo "Logged in."
+
+    - name: Run the audit
+      id: audit
+      shell: bash
+      env:
+        FAIL_ON: ${{ inputs.fail-on }}
+        FAIL_ON_INCONCLUSIVE: ${{ inputs.fail-on-inconclusive }}
+        CHECKS: ${{ inputs.checks }}
+        FORMAT: ${{ inputs.format }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+      run: |
+        set -uo pipefail
+        mkdir -p "${OUTPUT_DIR}"
+        formats="${FORMAT}"
+        case ",${formats}," in *,json,*) ;; *) formats="${formats},json" ;; esac
+        args=(audit security --target-org sf-audit-target --format "${formats}" --output "${OUTPUT_DIR}")
+        [ -n "${FAIL_ON}" ] && args+=(--fail-on "${FAIL_ON}")
+        [ "${FAIL_ON_INCONCLUSIVE}" = "true" ] && args+=(--fail-on-inconclusive)
+        [ -n "${CHECKS}" ] && args+=(--checks "${CHECKS}")
+        sf "${args[@]}"
+        code=$?
+        echo "exit-code=${code}" >> "$GITHUB_OUTPUT"
+        json="$(ls -t "${OUTPUT_DIR}"/*.json 2>/dev/null | head -n 1 || true)"
+        if [ -z "${json}" ]; then
+          echo "::error::The audit did not write a JSON report (exit ${code})."
+          exit "${code:-1}"
+        fi
+        echo "json-report=${json}" >> "$GITHUB_OUTPUT"
+        echo "grade=$(jq -r '.grade' "${json}")" >> "$GITHUB_OUTPUT"
+        echo "health-score=$(jq -r '.healthScore' "${json}")" >> "$GITHUB_OUTPUT"
+
+    - name: Write the job summary
+      if: always() && inputs.job-summary == 'true' && steps.audit.outputs.json-report != ''
+      shell: bash
+      env:
+        JSON: ${{ steps.audit.outputs.json-report }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        EXIT_CODE: ${{ steps.audit.outputs.exit-code }}
+      run: |
+        set -euo pipefail
+        jq -r --arg failOn "${FAIL_ON}" --arg code "${EXIT_CODE}" '
+          def open: [.findings[] | select((.passed | not) and (.inconclusive | not))];
+          def rank: {"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3,"INFO":4}[.riskLevel] // 5;
+          def cell: tostring | gsub("\\|"; "\\|") | gsub("\n"; " ");
+          "## sf-audit: grade \(.grade), health score \(.healthScore)/100",
+          "",
+          "Org `\(.orgId)` (\(.orgType)\(if .isSandbox then ", sandbox" else "" end)), audited \(.generatedAt).",
+          (if $failOn != "" then "Gate: fail on \($failOn) or above. Result: \(if $code == "0" then "passed" else "failed (exit \($code))" end)." else "No severity gate set." end),
+          "",
+          "| Severity | Open findings |", "|---|---|",
+          (["CRITICAL","HIGH","MEDIUM","LOW"] as $levels | $levels[] as $l | "| \($l) | \([open[] | select(.riskLevel == $l)] | length) |"),
+          "",
+          "Inconclusive checks: \([.findings[] | select(.inconclusive)] | length). An inconclusive check could not gather evidence; it is not a pass.",
+          "",
+          (if ((.attackChains // []) | length) > 0 then
+            "### Attack chains", "",
+            ((.attackChains // []) | sort_by({"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3}[.severity] // 4) | .[] | "- **\(.severity)** \(.title | cell)"),
+            ""
+          else empty end),
+          "### Highest-severity findings", "",
+          "| Severity | Finding | Check |", "|---|---|---|",
+          (open | sort_by(rank) | .[:15] | .[] | "| \(.riskLevel) | \(.title | cell) | `\(.checkId)` |"),
+          "",
+          "Full HTML, Markdown and JSON reports are in the workflow artifact.",
+          "",
+          "Prepared with [sf-audit](https://www.softwareinsights.dev/tools/?utm_source=sf-audit&utm_medium=ci&utm_campaign=github-action), an open-source, read-only Salesforce security tool."
+        ' "${JSON}" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload the reports
+      if: always() && inputs.upload-artifact == 'true' && steps.audit.outputs.json-report != ''
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.output-dir }}
+        if-no-files-found: warn
+
+    - name: Apply the gate
+      if: always() && steps.audit.outputs.exit-code != ''
+      shell: bash
+      env:
+        EXIT_CODE: ${{ steps.audit.outputs.exit-code }}
+      run: exit "${EXIT_CODE}"
