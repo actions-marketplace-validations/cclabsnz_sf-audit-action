@@ -78,4 +78,5 @@ jobs:
           checks: api-limits
           artifact-name: sf-audit-report-test
       - name: Check the summary was written
-        run: grep -q 'sf-audit: grade' "$GITHUB_STEP_SUMMARY"
+        run: |
+          grep -q 'sf-audit: grade' "$GITHUB_STEP_SUMMARY"
