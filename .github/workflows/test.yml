@@ -77,6 +77,12 @@ jobs:
           auth-url: ${{ secrets.SF_AUTH_URL }}
           checks: api-limits
           artifact-name: sf-audit-report-test
-      - name: Check the summary was written
+      # Each step gets its own summary file, so a later step cannot read what the action wrote.
+      # Check the report the summary is built from, and that its digest renders.
+      - name: Check the report and digest
+        env:
+          JSON: ${{ steps.audit.outputs.json-report }}
         run: |
-          grep -q 'sf-audit: grade' "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          test -s "$JSON"
+          jq -e '.grade and (.findings | length > 0)' "$JSON" > /dev/null
