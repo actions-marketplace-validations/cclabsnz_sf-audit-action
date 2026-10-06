@@ -63,3 +63,19 @@ jobs:
           set -euo pipefail
           [ "$OUTCOME" = "failure" ] || { echo "expected the step to fail, got $OUTCOME"; exit 1; }
           [ "$CODE" = "1" ] || { echo "expected exit 1, got $CODE"; exit 1; }
+
+  writes-summary-and-artifact:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # api-limits only: its result is API consumption, which says nothing about the org's
+      # exposure, so it is safe to publish from this public repository.
+      - id: audit
+        uses: ./
+        with:
+          auth-url: ${{ secrets.SF_AUTH_URL }}
+          checks: api-limits
+          artifact-name: sf-audit-report-test
+      - name: Check the summary was written
+        run: grep -q 'sf-audit: grade' "$GITHUB_STEP_SUMMARY"
