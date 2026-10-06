@@ -146,11 +146,13 @@ runs:
         formats="${FORMAT}"
         case ",${formats}," in *,json,*) ;; *) formats="${formats},json" ;; esac
         args=(audit security --target-org sf-audit-target --format "${formats}" --output "${OUTPUT_DIR}")
-        [ -n "${FAIL_ON}" ] && args+=(--fail-on "${FAIL_ON}")
-        [ "${FAIL_ON_INCONCLUSIVE}" = "true" ] && args+=(--fail-on-inconclusive)
-        [ -n "${CHECKS}" ] && args+=(--checks "${CHECKS}")
-        sf "${args[@]}"
-        code=$?
+        if [ -n "${FAIL_ON}" ]; then args+=(--fail-on "${FAIL_ON}"); fi
+        if [ "${FAIL_ON_INCONCLUSIVE}" = "true" ]; then args+=(--fail-on-inconclusive); fi
+        if [ -n "${CHECKS}" ]; then args+=(--checks "${CHECKS}"); fi
+        # Composite steps run under bash -e. A gate failure must not end the step before the exit
+        # code and report paths are recorded, or the summary and artifact steps have nothing to show.
+        code=0
+        sf "${args[@]}" || code=$?
         echo "exit-code=${code}" >> "$GITHUB_OUTPUT"
         json="$(ls -t "${OUTPUT_DIR}"/*.json 2>/dev/null | head -n 1 || true)"
         if [ -z "${json}" ]; then
