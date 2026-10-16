@@ -1,8 +1,11 @@
 name: Test
 
 # Runs the action against a throwaway Developer Edition org. This repository is public, so the
-# runs publish no job summary and no artifacts, and stick to two checks whose results reveal
-# nothing about the org beyond its Health Check score.
+# runs stick to two checks whose results reveal nothing about the org beyond its Health Check
+# score, and only the api-limits run publishes a job summary and an artifact.
+#
+# Pull requests from forks and from Dependabot get no repository secrets, so these jobs skip there
+# rather than fail at login. Dependabot bumps are tested by the push run on main after merge.
 on:
   push:
     branches: [main]
@@ -19,9 +22,11 @@ concurrency:
 jobs:
   passes-when-clean:
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: audit
         uses: ./
         with:
@@ -43,9 +48,11 @@ jobs:
 
   fails-on-gate:
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: audit
         uses: ./
         continue-on-error: true
@@ -66,9 +73,11 @@ jobs:
 
   writes-summary-and-artifact:
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # api-limits only: its result is API consumption, which says nothing about the org's
       # exposure, so it is safe to publish from this public repository.
       - id: audit

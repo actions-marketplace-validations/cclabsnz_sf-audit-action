@@ -1,6 +1,6 @@
 # sf-audit GitHub Action
 
-Runs a read-only security audit of a live Salesforce org from GitHub Actions and fails the job when its posture slips. It wraps [sf-audit](https://github.com/cclabsnz/sf-audit-plugin), an open-source `sf` CLI plugin: 93 checks across identity, permissions, sharing, guest access, connected apps, secrets, monitoring and code patterns, graded A to F and correlated into attack chains.
+Runs a read-only security audit of a live Salesforce org from GitHub Actions and fails the job when its posture slips. It wraps [sf-audit](https://github.com/cclabsnz/sf-audit-plugin), an open-source `sf` CLI plugin: over 100 checks across identity, permissions, sharing, guest access, connected apps, secrets, monitoring and code patterns, graded A to F and correlated into attack chains.
 
 Code scanners such as Salesforce Code Analyzer read your repository. This action reads the org itself: who holds which permissions, what guest users can reach, which settings drifted. Run both.
 
@@ -27,10 +27,11 @@ jobs:
         with:
           auth-url: ${{ secrets.SF_AUDIT_AUTH_URL }}
           fail-on: HIGH
-          plugin-version: '1.15.1'
+          plugin-version: '1.16.0'
+          cli-version: '2.154.4'
 ```
 
-The job fails when any finding is HIGH or CRITICAL. The job summary shows the grade, open findings by severity, the attack chains and the 15 most severe findings. The full HTML and Markdown reports are in the `sf-audit-report` artifact.
+The job fails when any finding is HIGH or CRITICAL, or when the audit does not produce a report. The job summary shows the grade, open findings by severity, the attack chains and the 15 most severe findings. The full HTML and Markdown reports are in the `sf-audit-report` artifact.
 
 ## Give it a read-only user
 
@@ -88,14 +89,14 @@ Do not run this on `pull_request` events from forks with secrets available. GitH
 | `instance-url` | `https://login.salesforce.com` | Login URL for JWT. Use `https://test.salesforce.com` for sandboxes. |
 | `fail-on` | | Fail when a finding is at or above `CRITICAL`, `HIGH`, `MEDIUM` or `LOW`. Empty never fails on findings. |
 | `fail-on-inconclusive` | `false` | Fail when a check could not gather evidence. |
-| `checks` | | Comma-separated check IDs. Empty runs all 93. `sf audit list` prints them. |
+| `checks` | | Comma-separated check IDs. Empty runs them all. `sf audit list` prints them. |
 | `format` | `html,md` | Report formats: `html`, `md`, `json`, `executive`. JSON is always added. |
-| `output-dir` | `sf-audit-report` | Where reports are written. |
+| `output-dir` | `sf-audit-report` | Where reports are written. Only a report written by this run is read. |
 | `job-summary` | `true` | Write a digest to the job summary. |
 | `upload-artifact` | `true` | Upload the reports as an artifact. |
 | `artifact-name` | `sf-audit-report` | Artifact name. |
-| `plugin-version` | `latest` | `@cclabsnz/sf-audit` version. Pin it. |
-| `cli-version` | `latest` | `@salesforce/cli` version. |
+| `plugin-version` | `latest` | `@cclabsnz/sf-audit` version. Pin an exact version. |
+| `cli-version` | `latest` | `@salesforce/cli` version. Pin an exact version. |
 | `node-version` | `22` | Node.js version. |
 
 ## Outputs
@@ -105,11 +106,15 @@ Do not run this on `pull_request` events from forks with secrets available. GitH
 | `grade` | Letter grade, A to F. |
 | `health-score` | Health score, 0 to 100. |
 | `json-report` | Path to the JSON report, for your own steps to read. |
-| `exit-code` | `0` clean, `1` a finding at or above `fail-on`, `3` inconclusive with `fail-on-inconclusive`. |
+| `exit-code` | `0` clean, `1` a finding at or above `fail-on` or no report written, `3` inconclusive with `fail-on-inconclusive`. |
 
 ## What it does not do
 
 It reads configuration, so it cannot prove what a public site returns to an anonymous visitor; test that from outside with a tool such as [AuraInspector](https://github.com/google/aura-inspector), against your own sites. Its code checks are pattern checks, not data-flow analysis; use Salesforce Code Analyzer for that. And an inconclusive check means the user could not see enough to judge, not that the org passed. `sf audit preflight` tells you which checks a user will be blind to before you spend a run.
+
+## Supply chain
+
+The action installs the Salesforce CLI and the plugin from npm on every run, with npm lifecycle scripts disabled. With `latest`, a run picks up whatever was published most recently, so pin both `plugin-version` and `cli-version` to exact versions in production workflows and update them deliberately.
 
 ## Versioning
 

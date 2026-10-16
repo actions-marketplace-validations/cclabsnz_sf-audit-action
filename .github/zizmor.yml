@@ -1,0 +1,10 @@
+rules:
+  # GitHub's `$/` self-repository syntax (July 2026) is not yet understood by actionlint 1.7.12,
+  # which would then fail on every `uses: ./`. Re-enable once actionlint supports it.
+  self-repository:
+    disable: true
+  # The action exists to install the Salesforce CLI and the plugin, so these are not lockfile
+  # dependencies. Users pin versions through the cli-version and plugin-version inputs.
+  adhoc-packages:
+    ignore:
+      - action.yml
