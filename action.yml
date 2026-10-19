@@ -1,5 +1,5 @@
 name: 'sf-audit: Salesforce Org Security Audit'
-description: 'Read-only security audit of a live Salesforce org: 93 checks, A-F grade, attack chains. Fails the job when posture slips.'
+description: 'Read-only security audit of a live Salesforce org: 100+ checks, A-F grade, attack chains. Fails the job when posture slips.'
 author: 'CloudCounsel (cclabsnz)'
 branding:
   icon: 'shield'
@@ -55,11 +55,11 @@ inputs:
     required: false
     default: 'sf-audit-report'
   plugin-version:
-    description: 'Version of @cclabsnz/sf-audit to install. Pin this in production workflows.'
+    description: 'Version of @cclabsnz/sf-audit to install, e.g. 1.16.0. Pin an exact version in production workflows: latest installs whatever was published most recently.'
     required: false
     default: 'latest'
   cli-version:
-    description: 'Version of @salesforce/cli to install.'
+    description: 'Version of @salesforce/cli to install, e.g. 2.154.4. Pin an exact version in production workflows.'
     required: false
     default: 'latest'
   node-version:
@@ -85,7 +85,7 @@ runs:
   using: 'composite'
   steps:
     - name: Set up Node.js
-      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: ${{ inputs.node-version }}
 
@@ -96,6 +96,9 @@ runs:
         PLUGIN_VERSION: ${{ inputs.plugin-version }}
       run: |
         set -euo pipefail
+        # No lifecycle scripts: neither the CLI nor the plugin needs one, and a compromised
+        # transitive dependency would otherwise run code on the runner before the audit starts.
+        export npm_config_ignore_scripts=true
         npm install --global --no-audit --no-fund "@salesforce/cli@${CLI_VERSION}"
         # The plugin is published with npm provenance but cannot carry a Salesforce signature, so
         # allowlist it. Otherwise the unsigned-plugin prompt waits for input and hangs the job.
@@ -143,6 +146,9 @@ runs:
       run: |
         set -uo pipefail
         mkdir -p "${OUTPUT_DIR}"
+        # Only accept a report this run wrote. A reused or cached output directory can hold an
+        # older one, and reading that would report a stale grade.
+        marker="$(mktemp)"
         formats="${FORMAT}"
         case ",${formats}," in *,json,*) ;; *) formats="${formats},json" ;; esac
         args=(audit security --target-org sf-audit-target --format "${formats}" --output "${OUTPUT_DIR}")
@@ -153,12 +159,17 @@ runs:
         # code and report paths are recorded, or the summary and artifact steps have nothing to show.
         code=0
         sf "${args[@]}" || code=$?
-        echo "exit-code=${code}" >> "$GITHUB_OUTPUT"
-        json="$(ls -t "${OUTPUT_DIR}"/*.json 2>/dev/null | head -n 1 || true)"
+        json="$(find "${OUTPUT_DIR}" -maxdepth 1 -type f -name 'sf-audit-*.json' -newer "${marker}" -print \
+          | sort | tail -n 1)"
+        rm -f "${marker}"
         if [ -z "${json}" ]; then
           echo "::error::The audit did not write a JSON report (exit ${code})."
-          exit "${code:-1}"
+          # Never let a missing report pass: exit 0 here would turn the job green with no audit.
+          if [ "${code}" -eq 0 ]; then code=1; fi
+          echo "exit-code=${code}" >> "$GITHUB_OUTPUT"
+          exit "${code}"
         fi
+        echo "exit-code=${code}" >> "$GITHUB_OUTPUT"
         echo "json-report=${json}" >> "$GITHUB_OUTPUT"
         echo "grade=$(jq -r '.grade' "${json}")" >> "$GITHUB_OUTPUT"
         echo "health-score=$(jq -r '.healthScore' "${json}")" >> "$GITHUB_OUTPUT"
@@ -175,7 +186,12 @@ runs:
         jq -r --arg failOn "${FAIL_ON}" --arg code "${EXIT_CODE}" '
           def open: [.findings[] | select((.passed | not) and (.inconclusive | not))];
           def rank: {"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3,"INFO":4}[.riskLevel] // 5;
-          def cell: tostring | gsub("\\|"; "\\|") | gsub("\n"; " ");
+          # Titles can carry org data. Escape Markdown and HTML so a title cannot inject a link
+          # (bare URLs included), an image or markup into the summary, or break out of its table
+          # cell. GitHub links an email address even when its @ is escaped, so a word joiner
+          # follows each @ instead.
+          def cell: tostring | gsub("[\r\n]+"; " ") | gsub("(?<c>[\\\\`*_{}\\[\\]()#+!|<>~:.-])"; "\\\(.c)")
+            | gsub("@"; "@\u2060");
           "## sf-audit: grade \(.grade), health score \(.healthScore)/100",
           "",
           "Org `\(.orgId)` (\(.orgType)\(if .isSandbox then ", sandbox" else "" end)), audited \(.generatedAt).",
@@ -202,7 +218,7 @@ runs:
 
     - name: Upload the reports
       if: always() && inputs.upload-artifact == 'true' && steps.audit.outputs.json-report != ''
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: ${{ inputs.artifact-name }}
         path: ${{ inputs.output-dir }}
