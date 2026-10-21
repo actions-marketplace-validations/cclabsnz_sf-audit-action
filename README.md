@@ -27,7 +27,7 @@ jobs:
         with:
           auth-url: ${{ secrets.SF_AUDIT_AUTH_URL }}
           fail-on: HIGH
-          plugin-version: '1.16.0'
+          plugin-version: '1.17.0'
           cli-version: '2.154.4'
 ```
 
@@ -90,7 +90,7 @@ Do not run this on `pull_request` events from forks with secrets available. GitH
 | `fail-on` | | Fail when a finding is at or above `CRITICAL`, `HIGH`, `MEDIUM` or `LOW`. Empty never fails on findings. |
 | `fail-on-inconclusive` | `false` | Fail when a check could not gather evidence. |
 | `checks` | | Comma-separated check IDs. Empty runs them all. `sf audit list` prints them. |
-| `format` | `html,md` | Report formats: `html`, `md`, `json`, `executive`. JSON is always added. |
+| `format` | `html,md` | Report formats: `html`, `md`, `json`, `executive`, `sarif`. JSON is always added. |
 | `output-dir` | `sf-audit-report` | Where reports are written. Only a report written by this run is read. |
 | `job-summary` | `true` | Write a digest to the job summary. |
 | `upload-artifact` | `true` | Upload the reports as an artifact. |
