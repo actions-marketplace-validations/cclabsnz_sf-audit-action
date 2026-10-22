@@ -27,7 +27,7 @@ jobs:
         with:
           auth-url: ${{ secrets.SF_AUDIT_AUTH_URL }}
           fail-on: HIGH
-          plugin-version: '1.18.0'
+          plugin-version: '1.18.1'
           cli-version: '2.154.4'
 ```
 

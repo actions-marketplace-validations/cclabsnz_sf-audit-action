@@ -55,7 +55,7 @@ inputs:
     required: false
     default: 'sf-audit-report'
   plugin-version:
-    description: 'Version of @cclabsnz/sf-audit to install, e.g. 1.18.0. Pin an exact version in production workflows: latest installs whatever was published most recently.'
+    description: 'Version of @cclabsnz/sf-audit to install, e.g. 1.18.1. Pin an exact version in production workflows: latest installs whatever was published most recently.'
     required: false
     default: 'latest'
   cli-version:
